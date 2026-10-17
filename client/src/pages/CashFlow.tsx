@@ -115,13 +115,9 @@ interface SankeyDiagramProps {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatDollars(cents: number): string {
-  const sym = usePreferencesStore.getState().currencySymbol || '$';
-  const abs = Math.abs(cents);
-  const dollars = Math.round(abs / 100);
-  const f = dollars.toLocaleString('en-US');
-  return cents < 0 ? `-${sym}${f}` : `${sym}${f}`;
-}
+/** A whole amount, without cents: node labels are short. Halves round away from zero either way. */
+const formatDollars = (cents: number) =>
+  formatCurrency(Math.sign(cents) * Math.round(Math.abs(cents) / 100) * 100);
 
 function lighten(hex: string, amt: number): string {
   const r = parseInt(hex.slice(1, 3), 16);

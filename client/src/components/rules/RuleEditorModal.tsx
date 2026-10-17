@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { format, parseISO } from 'date-fns';
 import { Plus, Trash2, X } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { CurrencyInput } from '../ui/CurrencyInput';
+import { AmountFields, useAmountValidity } from '../ui/amountValidity';
 import { CategorySelectButton } from '../transactions/CategorySelectButton';
 import { MerchantSelect } from '../transactions/MerchantSelect';
 import { OptionPicker, type PickerOption } from './OptionPicker';
@@ -35,6 +35,7 @@ import type {
   RuleInput,
   RuleSplitPart,
 } from '../../types';
+import { formatDay } from '../../utils/dates';
 
 const fieldClass =
   'text-sm border border-border rounded-lg px-2 py-1.5 bg-surface text-text focus:outline-none focus:ring-1 focus:ring-brand-400';
@@ -70,6 +71,8 @@ export function RuleEditorModal({
 
   const rule: RuleInput = { ...initial, conditionsOp, conditions, actions };
   const complete = isRuleComplete(rule);
+  // Amounts in conditions or split parts that can't be read: the rule would keep the old ones
+  const { allValid: amountsValid, report } = useAmountValidity();
 
   const setCondition = (i: number, c: RuleCondition) =>
     setConditions((cs) => cs.map((x, j) => (j === i ? c : x)));
@@ -78,94 +81,96 @@ export function RuleEditorModal({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="xl">
-      <div className="space-y-6">
-        <section>
-          <div className="flex items-center gap-2 mb-2 text-sm text-text-secondary">
-            <span className="font-medium">If</span>
-            <select
-              value={conditionsOp}
-              onChange={(e) => setConditionsOp(e.target.value as 'and' | 'or')}
-              className={`${fieldClass} py-1`}
-              aria-label="How conditions combine"
+      <AmountFields report={report}>
+        <div className="space-y-6">
+          <section>
+            <div className="flex items-center gap-2 mb-2 text-sm text-text-secondary">
+              <span className="font-medium">If</span>
+              <select
+                value={conditionsOp}
+                onChange={(e) => setConditionsOp(e.target.value as 'and' | 'or')}
+                className={`${fieldClass} py-1`}
+                aria-label="How conditions combine"
+              >
+                <option value="and">all</option>
+                <option value="or">any</option>
+              </select>
+              <span>of these conditions match</span>
+            </div>
+            <div className="space-y-2">
+              {conditions.map((c, i) => (
+                <ConditionRow
+                  key={i}
+                  condition={c}
+                  options={options}
+                  onChange={(next) => setCondition(i, next)}
+                  onRemove={() => setConditions((cs) => cs.filter((_, j) => j !== i))}
+                />
+              ))}
+              {!conditions.length && (
+                <p className="text-xs text-caution bg-surface-alt rounded-lg px-3 py-2">
+                  No conditions: this rule applies to every transaction.
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setConditions((cs) => [...cs, newCondition()])}
+              className="mt-2 flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700 cursor-pointer"
             >
-              <option value="and">all</option>
-              <option value="or">any</option>
-            </select>
-            <span>of these conditions match</span>
-          </div>
-          <div className="space-y-2">
-            {conditions.map((c, i) => (
-              <ConditionRow
-                key={i}
-                condition={c}
-                options={options}
-                onChange={(next) => setCondition(i, next)}
-                onRemove={() => setConditions((cs) => cs.filter((_, j) => j !== i))}
-              />
-            ))}
-            {!conditions.length && (
-              <p className="text-xs text-caution bg-surface-alt rounded-lg px-3 py-2">
-                No conditions: this rule applies to every transaction.
-              </p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => setConditions((cs) => [...cs, newCondition()])}
-            className="mt-2 flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700 cursor-pointer"
-          >
-            <Plus size={12} /> Add condition
-          </button>
-        </section>
+              <Plus size={12} /> Add condition
+            </button>
+          </section>
 
-        <section>
-          <p className="text-sm font-medium text-text-secondary mb-2">Then</p>
-          <div className="space-y-2">
-            {actions.map((a, i) => (
-              <ActionRow
-                key={i}
-                action={a}
-                canRemove={actions.length > 1}
-                onChange={(next) => setAction(i, next)}
-                onRemove={() => setActions((as) => as.filter((_, j) => j !== i))}
-              />
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={() => setActions((as) => [...as, newAction()])}
-            className="mt-2 flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700 cursor-pointer"
-          >
-            <Plus size={12} /> Add action
-          </button>
-        </section>
-
-        <MatchPreview conditionsOp={conditionsOp} conditions={conditions} options={options} />
-
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-border-light">
-          <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-            <input
-              type="checkbox"
-              checked={applyExisting}
-              onChange={(e) => setApplyExisting(e.target.checked)}
-              className="h-4 w-4 rounded border-border accent-brand-600"
-            />
-            Apply to existing transactions after saving
-          </label>
-          <div className="flex items-center gap-3 ml-auto">
-            <SavingPausedHint />
-            <Button variant="secondary" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => onSave(rule, applyExisting)}
-              disabled={!complete || saving || !canSave}
+          <section>
+            <p className="text-sm font-medium text-text-secondary mb-2">Then</p>
+            <div className="space-y-2">
+              {actions.map((a, i) => (
+                <ActionRow
+                  key={i}
+                  action={a}
+                  canRemove={actions.length > 1}
+                  onChange={(next) => setAction(i, next)}
+                  onRemove={() => setActions((as) => as.filter((_, j) => j !== i))}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setActions((as) => [...as, newAction()])}
+              className="mt-2 flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700 cursor-pointer"
             >
-              {saving ? 'Saving…' : 'Save rule'}
-            </Button>
+              <Plus size={12} /> Add action
+            </button>
+          </section>
+
+          <MatchPreview conditionsOp={conditionsOp} conditions={conditions} options={options} />
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-border-light">
+            <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                checked={applyExisting}
+                onChange={(e) => setApplyExisting(e.target.checked)}
+                className="h-4 w-4 rounded border-border accent-brand-600"
+              />
+              Apply to existing transactions after saving
+            </label>
+            <div className="flex items-center gap-3 ml-auto">
+              <SavingPausedHint />
+              <Button variant="secondary" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => onSave(rule, applyExisting)}
+                disabled={!complete || !amountsValid || saving || !canSave}
+              >
+                {saving ? 'Saving…' : 'Save rule'}
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+      </AmountFields>
     </Modal>
   );
 }
@@ -597,9 +602,7 @@ function MatchPreview({
             key={tx.id}
             className="flex items-center gap-3 px-3 py-1.5 text-xs border-b last:border-b-0 border-border-light"
           >
-            <span className="w-20 shrink-0 text-text-tertiary">
-              {format(parseISO(tx.date), 'MMM d, yyyy')}
-            </span>
+            <span className="w-20 shrink-0 text-text-tertiary">{formatDay(tx.date)}</span>
             <span className="flex-1 truncate text-text">{tx.payeeName ?? '—'}</span>
             <span className="hidden sm:block w-40 truncate text-text-tertiary">
               {(tx.categoryId && options.lookups.category(tx.categoryId)) || 'Uncategorized'}

@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import fs from 'fs';
 import { test, expect, open, isoDay } from './fixtures';
 
 // Settings: managing categories and groups, and preferences.
@@ -119,6 +120,92 @@ test.describe('preferences', () => {
     await page.reload();
     await expect(page.locator('html')).toHaveClass(/dark/);
   });
+
+  test('amounts and dates the European way, typed with a decimal comma', async ({ page, api }) => {
+    const girokonto = await api.createAccount('Girokonto', 0);
+    await api.createTransaction({
+      accountId: girokonto.id,
+      date: isoDay(),
+      amount: -123_456,
+      payeeName: 'Miete',
+    });
+    await open(page, '/settings');
+    await page.getByRole('button', { name: 'Preferences' }).click();
+    const main = page.getByRole('main');
+    // Automatic follows the browser's language (en-US in the tests)
+    await expect(main).toContainText('Example: -$1,234.56');
+
+    await main
+      .getByRole('group', { name: 'Number format' })
+      .getByRole('button', { name: '1.234,56' })
+      .click();
+    await main.getByRole('textbox', { name: 'Currency symbol' }).fill('€');
+    await main
+      .getByRole('group', { name: 'Currency symbol position' })
+      .getByRole('button', { name: 'After' })
+      .click();
+    await main.getByRole('button', { name: /^dd\.MM\.yyyy/ }).click();
+    await expect(main).toContainText('Example: -1.234,56 €');
+
+    await open(page, `/accounts/${girokonto.id}`);
+    const register = page.getByRole('main');
+    await expect(register).toContainText('-1.234,56 €');
+    const [y, m, d] = isoDay().split('-');
+    await expect(register).toContainText(`${d}.${m}.${y}`);
+
+    // A decimal comma and a decimal point both work
+    for (const [typed, cents] of [
+      ['12,50', -1_250],
+      ['7.25', -725],
+    ] as const) {
+      await page.getByRole('button', { name: 'Add Transaction' }).click();
+      const form = page.getByRole('form', { name: 'New transaction' });
+      await form.getByRole('textbox', { name: 'Payee' }).fill(`Bäckerei ${typed}`);
+      await form.getByRole('textbox', { name: 'Outflow' }).fill(typed);
+      await form.getByRole('button', { name: 'Save' }).click();
+      await expect(register).toContainText(`Bäckerei ${typed}`);
+      const txs = await api.transactions(`?account_id=${girokonto.id}`);
+      expect(txs.find((t) => t.payeeName === `Bäckerei ${typed}`)?.amount).toBe(cents);
+    }
+    // Outflows have their own column, without a minus sign
+    await expect(register).toContainText('12,50 €');
+    await expect(register).toContainText('7,25 €');
+
+    // The setting stays after a reload
+    await page.reload();
+    await expect(register).toContainText('-1.254,31 €'); // the balance, with both new ones
+  });
+
+  test('exports transactions with a decimal comma for spreadsheets that expect one', async ({
+    page,
+    api,
+  }) => {
+    const girokonto = await api.createAccount('Girokonto', 0);
+    await api.createTransaction({
+      accountId: girokonto.id,
+      date: isoDay(),
+      amount: -1_250,
+      payeeName: 'Bäckerei',
+    });
+    await open(page, '/settings');
+    await page.getByRole('button', { name: 'Preferences' }).click();
+    await page
+      .getByRole('main')
+      .getByRole('group', { name: 'Number format' })
+      .getByRole('button', { name: '1.234,56' })
+      .click();
+    await page.getByRole('button', { name: 'Data' }).click();
+    // The Data tab says how the file will be written
+    await expect(page.getByRole('main')).toContainText(
+      'Amounts are written like -12,50, with semicolons between columns',
+    );
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download CSV' }).click();
+    const csv = fs.readFileSync(await (await download).path(), 'utf8');
+    expect(csv.split('\n')[0]).toBe('Date;Account;Payee;Category;Notes;Amount;Reconciled');
+    expect(csv).toContain(';Girokonto;Bäckerei;');
+    expect(csv).toContain(';-12,50;');
+  });
 });
 
 test.describe('goals', () => {
@@ -169,4 +256,29 @@ test('settings link to the license and the source code', async ({ page, api }) =
   // Opens outside the app (the desktop app hands https links to the system browser)
   await expect(source).toHaveAttribute('target', '_blank');
   await expect(source).toHaveAttribute('rel', /noopener/);
+});
+
+test.describe('amounts on a German device', () => {
+  test.use({ locale: 'de-DE' });
+
+  test('a new install follows the device language', async ({ page, api }) => {
+    const girokonto = await api.createAccount('Girokonto', 123_456);
+    await open(page, `/accounts/${girokonto.id}`);
+    await expect(page.getByRole('main')).toContainText('1.234,56 $');
+  });
+
+  test('an install from before the setting keeps the amounts it had', async ({ page, api }) => {
+    const girokonto = await api.createAccount('Girokonto', 123_456);
+    // Preferences saved by a version without the amount format (no version number)
+    await page.addInitScript(() => {
+      if (!localStorage.getItem('budget-preferences')) {
+        localStorage.setItem(
+          'budget-preferences',
+          JSON.stringify({ state: { currencySymbol: '$', setupSkipped: true }, version: 0 }),
+        );
+      }
+    });
+    await open(page, `/accounts/${girokonto.id}`);
+    await expect(page.getByRole('main')).toContainText('$1,234.56');
+  });
 });

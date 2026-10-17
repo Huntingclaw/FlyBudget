@@ -68,6 +68,27 @@ test.describe('accounts', () => {
       .toMatchObject({ isOffBudget: 1, balance: 35_000_000 });
   });
 
+  test("a starting balance that isn't an amount can't be created as 0", async ({ page, api }) => {
+    await api.createAccount('Checking', 0);
+    await open(page, '/accounts');
+    await page.getByRole('main').getByRole('button', { name: 'Add Account' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add Account' });
+    await dialog.getByRole('textbox', { name: 'Account name' }).fill('Girokonto');
+    const balance = dialog.getByRole('textbox', { name: 'Current Balance' });
+    await balance.fill('1.234.5');
+    // Refused as soon as it's typed, before the field is left
+    await expect(dialog.getByRole('button', { name: 'Add Account' })).toBeDisabled();
+    await balance.press('Enter');
+    await expect(dialog).toBeVisible();
+
+    await balance.fill('1.234,50');
+    await dialog.getByRole('button', { name: 'Add Account' }).click();
+    await expect(dialog).toBeHidden();
+    await expect
+      .poll(async () => (await api.accounts()).find((a) => a.name === 'Girokonto')?.balance)
+      .toBe(123_450);
+  });
+
   test('renaming an account keeps its balance', async ({ page, api }) => {
     const account = await api.createAccount('Checking', 250_000);
     await api.createTransaction({
@@ -95,6 +116,25 @@ test.describe('accounts', () => {
     await typeAmount(dialog.getByRole('textbox', { name: 'Starting balance' }), '500');
     await dialog.getByRole('button', { name: 'Save' }).click();
     await expect.poll(() => api.balance(account.id)).toBe(50_000);
+  });
+
+  test("text that isn't an amount is marked and keeps the balance it had", async ({
+    page,
+    api,
+  }) => {
+    const account = await api.createAccount('Checking', 10_000);
+    await open(page, `/accounts/${account.id}`);
+    await page.getByRole('button', { name: 'Edit' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Edit Account' });
+    const field = dialog.getByRole('textbox', { name: 'Starting balance' });
+    await typeAmount(field, '12.5.0');
+    await expect(field).toHaveAttribute('aria-invalid', 'true');
+    await expect(field).toHaveValue('12.5.0');
+    await expect(dialog.getByRole('alert')).toHaveText(
+      "That isn't an amount. Type it like 12.50 or 12,50.",
+    );
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(() => api.balance(account.id)).toBe(10_000);
   });
 
   test('closing an account hides it', async ({ page, api }) => {

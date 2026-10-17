@@ -3,12 +3,21 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { IS_DEMO } from '../demo/isDemo';
 
 export type Theme = 'light' | 'dark' | 'system';
-export type DateFormatOption = 'MMM d, yyyy' | 'MM/dd/yyyy' | 'dd/MM/yyyy' | 'yyyy-MM-dd';
+export type DateFormatOption =
+  'MMM d, yyyy' | 'MM/dd/yyyy' | 'dd/MM/yyyy' | 'dd.MM.yyyy' | 'yyyy-MM-dd';
+/** How amounts are written: 1,234.56 / 1.234,56 / 1 234,56 / 1'234.56 */
+export type AmountFormat = 'dot' | 'comma' | 'space' | 'apostrophe';
+/** Whether the currency symbol goes before (€12.50) or after (12,50 €) the amount */
+export type SymbolPosition = 'before' | 'after';
 export type SidebarMode = 'persistent' | 'auto-hide';
 
 interface PreferencesState {
   theme: Theme;
   currencySymbol: string;
+  /** 'auto' = as the device's language writes amounts */
+  amountFormat: AmountFormat | 'auto';
+  /** 'auto' = as the device's language writes amounts */
+  symbolPosition: SymbolPosition | 'auto';
   dateFormat: DateFormatOption;
   savingsGoal: number;
   sidebarMode: SidebarMode;
@@ -25,6 +34,8 @@ interface PreferencesState {
   gettingStartedHidden: boolean;
   setTheme: (theme: Theme) => void;
   setCurrencySymbol: (symbol: string) => void;
+  setAmountFormat: (format: AmountFormat | 'auto') => void;
+  setSymbolPosition: (position: SymbolPosition | 'auto') => void;
   setDateFormat: (format: DateFormatOption) => void;
   setSavingsGoal: (goal: number) => void;
   setSidebarMode: (mode: SidebarMode) => void;
@@ -39,11 +50,30 @@ interface PreferencesState {
 
 const PREFERENCES_KEY = 'budget-preferences';
 
+/** 1: amount format and symbol position (Automatic for new installs) */
+export const PREFERENCES_VERSION = 1;
+
+/**
+ * Preferences saved by an older version, brought up to date. Installs from before the amount
+ * format existed keep 1,234.56 with the symbol first, as they had: switching them to their
+ * device's language (Automatic, the default for new installs) would change every amount on
+ * screen and the CSV files their spreadsheets expect, without them asking.
+ */
+export function migratePreferences(persisted: unknown, version: number): unknown {
+  const state = persisted && typeof persisted === 'object' ? { ...persisted } : {};
+  if (version < 1) {
+    Object.assign(state, { amountFormat: 'dot', symbolPosition: 'before' });
+  }
+  return state;
+}
+
 export const usePreferencesStore = create<PreferencesState>()(
   persist(
     (set) => ({
       theme: 'light',
       currencySymbol: '$',
+      amountFormat: 'auto',
+      symbolPosition: 'auto',
       dateFormat: 'MMM d, yyyy',
       savingsGoal: 20,
       sidebarMode: 'persistent',
@@ -56,6 +86,8 @@ export const usePreferencesStore = create<PreferencesState>()(
       gettingStartedHidden: false,
       setTheme: (theme) => set({ theme }),
       setCurrencySymbol: (currencySymbol) => set({ currencySymbol }),
+      setAmountFormat: (amountFormat) => set({ amountFormat }),
+      setSymbolPosition: (symbolPosition) => set({ symbolPosition }),
       setDateFormat: (dateFormat) => set({ dateFormat }),
       setSavingsGoal: (savingsGoal) => set({ savingsGoal }),
       setSidebarMode: (sidebarMode) => set({ sidebarMode }),
@@ -72,6 +104,8 @@ export const usePreferencesStore = create<PreferencesState>()(
       // The demo (website "Try the demo") shares the website's storage: keep its preferences
       // in this tab only, so they're gone with the demo budget when the tab closes
       storage: createJSONStorage(() => (IS_DEMO ? sessionStorage : localStorage)),
+      version: PREFERENCES_VERSION,
+      migrate: (persisted, version) => migratePreferences(persisted, version) as PreferencesState,
     },
   ),
 );

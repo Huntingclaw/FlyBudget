@@ -1,10 +1,12 @@
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Download, Upload } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { restoreBackup } from '../../api/backup';
 import { IS_DEMO, downloadFromApi } from '../../demo/demoApi';
+import { decimalSeparator, useAmountStyle } from '../../utils/currency';
 
 const API_BASE = '/api/export';
 
@@ -15,6 +17,7 @@ const download = (url: string) =>
 export function DataExport() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const decimalComma = decimalSeparator(useAmountStyle().format) === ',';
   const fileInput = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<{ name: string; data: unknown } | null>(null);
   const [restoring, setRestoring] = useState(false);
@@ -61,6 +64,8 @@ export function DataExport() {
     const params = new URLSearchParams();
     if (from) params.set('from', from);
     if (to) params.set('to', to);
+    // Spreadsheets in languages with a decimal comma expect 12,50 and ; between columns
+    if (decimalComma) params.set('decimal', 'comma');
     const qs = params.toString();
     download(`${API_BASE}/transactions/csv${qs ? `?${qs}` : ''}`);
   }
@@ -79,6 +84,16 @@ export function DataExport() {
           <h3 className="text-sm font-medium text-text">Export Transactions</h3>
           <p className="text-xs text-text-tertiary mt-0.5">
             Download all transactions as a CSV file. Optionally filter by date range.
+          </p>
+          <p className="text-xs text-text-tertiary mt-1">
+            {decimalComma
+              ? 'Amounts are written like -12,50, with semicolons between columns, '
+              : 'Amounts are written like -12.50, with commas between columns, '}
+            following your number format in{' '}
+            <Link to="/settings?tab=preferences" className="underline hover:text-text-secondary">
+              Preferences
+            </Link>
+            . Report exports use the same separator.
           </p>
         </div>
         <div className="flex items-end gap-3">

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ChevronRight, Check } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 import { useAccounts } from '../hooks/useAccounts';
 import {
   useTransactions,
@@ -11,8 +11,10 @@ import {
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { CurrencyInput } from '../components/ui/CurrencyInput';
+import { AmountFields, useAmountValidity } from '../components/ui/amountValidity';
 import { formatCurrency } from '../utils/currency';
 import type { Transaction } from '../types';
+import { formatDay } from '../utils/dates';
 
 export default function ReconcilePage() {
   const { id } = useParams<{ id: string }>();
@@ -30,9 +32,12 @@ export default function ReconcilePage() {
 
   const [step, setStep] = useState<1 | 2>(1);
   const [statementBalance, setStatementBalance] = useState(0);
+  // A statement balance that can't be read would reconcile against the one from before
+  const { allValid: statementValid, report } = useAmountValidity();
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
   function startStep2() {
+    if (!statementValid) return;
     setCheckedIds(new Set());
     setStep(2);
   }
@@ -116,11 +121,14 @@ export default function ReconcilePage() {
 
             <div className="space-y-2">
               <label className="text-sm font-medium text-text-secondary">Statement Balance</label>
-              <CurrencyInput
-                value={statementBalance}
-                onChange={setStatementBalance}
-                className="w-full text-lg"
-              />
+              <AmountFields report={report}>
+                <CurrencyInput
+                  value={statementBalance}
+                  onChange={setStatementBalance}
+                  aria-label="Statement balance"
+                  className="w-full text-lg"
+                />
+              </AmountFields>
             </div>
 
             <div className="rounded-lg border border-border-light bg-surface-alt px-4 py-3">
@@ -130,7 +138,7 @@ export default function ReconcilePage() {
               </p>
             </div>
 
-            <Button onClick={startStep2} disabled={isLoading} className="w-full">
+            <Button onClick={startStep2} disabled={isLoading || !statementValid} className="w-full">
               Start Reconciliation
             </Button>
           </div>
@@ -203,7 +211,7 @@ export default function ReconcilePage() {
                       className={`border-b border-border-light cursor-pointer transition-colors ${checked ? 'bg-positive-subtle hover:bg-positive-subtle' : 'hover:bg-hover'}`}
                     >
                       <td className="px-4 py-2 text-xs text-text-tertiary whitespace-nowrap">
-                        {format(parseISO(tx.date), 'MMM d, yyyy')}
+                        {formatDay(tx.date)}
                       </td>
                       <td className="px-4 py-2 text-sm text-text">
                         {tx.payeeName ?? <span className="text-text-disabled italic">—</span>}

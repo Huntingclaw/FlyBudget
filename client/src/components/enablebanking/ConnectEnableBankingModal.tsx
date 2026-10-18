@@ -582,7 +582,15 @@ function MappingStep({
   const { data: existingAccounts = [] } = useAccounts();
   const canSave = useCanSave();
   const linked = new Set(mappings.filter((m) => m.action === 'link').map((m) => m.accountId));
-  const incomplete = mappings.some((m) => m.action === 'link' && !m.accountId);
+  // A link still to choose, or to an account in another currency than the bank account's
+  // (its amounts would be read in the wrong currency)
+  const incomplete = mappings.some((m) => {
+    if (m.action !== 'link') return false;
+    if (!m.accountId) return true;
+    const bank = result.accounts.find((a) => a.mappingId === m.mappingId)?.currency;
+    const target = existingAccounts.find((a) => a.id === m.accountId)?.currency;
+    return !!bank && !!target && target !== bank.toUpperCase();
+  });
 
   return (
     <div className="space-y-4">
@@ -734,6 +742,17 @@ function MappingCard({
               Your last bank statement for this account went here.
             </p>
           )}
+          {(() => {
+            // The bank's amounts are in its account's currency: another one would misread them
+            const target = existingAccounts.find((a) => a.id === mapping.accountId);
+            const theirs = account.currency?.toUpperCase();
+            return target?.currency && theirs && target.currency !== theirs ? (
+              <p role="alert" className="text-[11px] text-caution">
+                This bank account is in {theirs}, but {target.name} is in {target.currency}. Link it
+                to an account in {theirs}, or create a new one.
+              </p>
+            ) : null;
+          })()}
           {!account.accountId && (
             <label className="flex items-start gap-2 text-xs text-text-secondary">
               <input
